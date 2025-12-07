@@ -1056,6 +1056,16 @@ void test ( hashfunc<hashtype> hash, HashInfo* info )
       printf("Custom: SparseTest 64-bit keys\n");
       SparseKeyTest< 64, hashtype >(hash, 2, true, true, true, g_drawDiagram);
 
+      // 4. Differential Test
+      printf("Custom: Differential Test\n");
+      // Testing 2-bit differentials on 64-bit keys (1000 reps)
+      DiffTest< Blob<64>, hashtype >(hash, 2, 1000, true);
+
+      // 5. Seed Test
+      printf("Custom: Seed Test\n");
+      // Testing 500k keys for seed collisions
+      SeedTest<hashtype>(hash, 500000, false);
+
       printf("\nCustom tests finished.\n");
       return;
   }
