@@ -63,9 +63,9 @@ void WideGEMM_BitStripe(const void *key, int len, uint32_t seed, void *out) {
     // Explicit cast to uint32_t prevents sign-extension of negative int32 results
     uint64_t packed = 
           ((uint64_t)(uint32_t)h[0])
-        | ((uint64_t)(uint32_t)h[1] << 16)
-        | ((uint64_t)(uint32_t)h[2] << 32)
-        | ((uint64_t)(uint32_t)h[3] << 48);
+        ^ ((uint64_t)(uint32_t)h[1] << 16)
+        ^ ((uint64_t)(uint32_t)h[2] << 32)
+        ^ ((uint64_t)(uint32_t)h[3] << 48);
 
     // 5. Step D: Non-Linear Finalizer (2 Rounds)
     const uint64_t kMul = 0x9ddfea08eb382d69ULL;
