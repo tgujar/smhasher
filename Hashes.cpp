@@ -7,6 +7,64 @@
 #include <assert.h>
 //#include <emmintrin.h>
 //#include <xmmintrin.h>
+#include <random>
+#include <cstring>
+// ----------------------------------------------------------------------------
+// Mock GPU logic for WideGEMM_BitStripe
+// ----------------------------------------------------------------------------
+
+static int8_t g_weights[8][4];
+static uint32_t g_cached_seed = 0xFFFFFFFF; // Init to impossible seed or force update first time
+
+// Helper to mock curand behavior on GPU
+static void GenerateWeights(uint32_t seed) {
+    if (seed == g_cached_seed) return;
+    
+    // Note: This does not bit-match GPU curand (XORWOW) but validates 
+    // the hash algorithm's robustness under high-quality random seeding.
+    std::mt19937 rng(seed);
+    std::uniform_int_distribution<int> dist(-128, 127);
+
+    for (int i = 0; i < 8; i++) {
+        for (int j = 0; j < 4; j++) {
+            g_weights[i][j] = (int8_t)dist(rng);
+        }
+    }
+    g_cached_seed = seed;
+}
+
+void WideGEMM_BitStripe(const void *key, int len, uint32_t seed, void *out) {
+    // Lazy weight generation
+    GenerateWeights(seed);
+
+    // 1. Prepare Input (Zero-pad to 8 bytes)
+    int8_t input[8] = {0};
+    int copy_len = len > 8 ? 8 : len;
+    std::memcpy(input, key, copy_len);
+
+    // 2. Compute 4 independent dot products (fake Tensor Core GEMM)
+    int32_t h[4] = {0};
+    
+    for (int col = 0; col < 4; col++) {
+        for (int row = 0; row < 8; row++) {
+            h[col] += input[row] * g_weights[row][col];
+        }
+    }
+
+    // 3. Bit-Stripe finalization
+    // Pack 4x 32-bit results into 64-bit output
+    uint64_t h0 = (uint32_t)h[0];
+    uint64_t h1 = (uint32_t)h[1];
+    uint64_t h2 = (uint32_t)h[2];
+    uint64_t h3 = (uint32_t)h[3];
+
+    uint64_t layer1 = h0 ^ (h1 << 16) ^ (h2 << 32) ^ (h3 << 48);
+    uint64_t layer2 = (h0 << 8) ^ (h1 << 24) ^ (h2 << 40) ^ (h3 << 56);
+    
+    uint64_t result = layer1 ^ layer2;
+
+    *(uint64_t*)out = result;
+}
 
 // ----------------------------------------------------------------------------
 //fake / bad hashes

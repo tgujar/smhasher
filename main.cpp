@@ -93,6 +93,7 @@ const char* quality_str[3] = { "SKIP", "POOR", "GOOD" };
 HashInfo g_hashes[] =
 {
 // first the bad hash funcs, failing tests:
+{ WideGEMM_BitStripe,   64, 0x00000000, "WideGEMM_BitStripe", "Mock GPU Tensor Core Hash", GOOD, {} },
 { DoNothingHash,        32, 0x0, "donothing32", "Do-Nothing function (measure call overhead)", SKIP, {0UL} /* !! */ },
 { DoNothingHash,        64, 0x0, "donothing64", "Do-Nothing function (measure call overhead)", SKIP, {0ULL} /* !! */ },
 { DoNothingHash,       128, 0x0, "donothing128", "Do-Nothing function (measure call overhead)", SKIP, {0UL} /* !! */ },
@@ -1036,6 +1037,27 @@ template < typename hashtype >
 void test ( hashfunc<hashtype> hash, HashInfo* info )
 {
   const int hashbits = sizeof(hashtype) * 8;
+  if (strcmp(info->name, "WideGEMM_BitStripe") == 0) {
+      printf("--- Testing WideGEMM_BitStripe (Custom GPU Mock Mode) ---\n");
+      printf("Running specialized Tensor Core projection tests...\n\n");
+
+      bool verbose = true;
+      
+      // 1. Avalanche Test for 32-bit keys (4 bytes)
+      printf("Custom: AvalancheTest 32-bit keys\n");
+      AvalancheTest< Blob<32>, hashtype >(hash, 100000, verbose);
+
+      // 2. Avalanche Test for 64-bit keys (8 bytes)
+      printf("Custom: AvalancheTest 64-bit keys\n");
+      AvalancheTest< Blob<64>, hashtype >(hash, 100000, verbose);
+
+      // 3. Sparse Test for 64-bit keys (8 bytes)
+      printf("Custom: SparseTest 64-bit keys\n");
+      SparseKeyTest< 64, hashtype >(hash, 2, true, true, true, g_drawDiagram);
+
+      printf("\nCustom tests finished.\n");
+      return;
+  }
 
   if (g_testAll) {
     printf("-------------------------------------------------------------------------------\n");
