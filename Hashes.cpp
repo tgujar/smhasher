@@ -52,22 +52,25 @@ void WideGEMM_BitStripe(const void *key, int len, uint32_t seed, void *out) {
         }
     }
 
-    // 3. Step B: Collapse (XOR Fold) and Step C: Pack (Tightly)
-    // Fold upper 4 partials onto lower 4
-    int32_t t0 = h[0] ^ h[4];
-    int32_t t1 = h[1] ^ h[5];
-    int32_t t2 = h[2] ^ h[6];
-    int32_t t3 = h[3] ^ h[7];
+    // 3. Step B: Collapse (XOR Fold)
+    // Simplify loop to direct XOR fold
+    h[0] ^= h[4];
+    h[1] ^= h[5];
+    h[2] ^= h[6];
+    h[3] ^= h[7];
 
-    // Pack 17-bit entropy chunks (overlapping) into 64-bit output
+    // 4. Step C: Pack (Tightly) with Safe Casting
+    // Explicit cast to uint32_t prevents sign-extension of negative int32 results
     uint64_t packed = 
-          ((uint64_t)t0)
-        | ((uint64_t)t1 << 16)
-        | ((uint64_t)t2 << 32)
-        | ((uint64_t)t3 << 48);
+          ((uint64_t)(uint32_t)h[0])
+        | ((uint64_t)(uint32_t)h[1] << 16)
+        | ((uint64_t)(uint32_t)h[2] << 32)
+        | ((uint64_t)(uint32_t)h[3] << 48);
 
-    // 4. Step D: Non-Linear Finalizer
+    // 5. Step D: Non-Linear Finalizer (2 Rounds)
     const uint64_t kMul = 0x9ddfea08eb382d69ULL;
+    packed *= kMul;
+    packed ^= (packed >> 47);
     packed *= kMul;
     packed ^= (packed >> 47);
 
