@@ -144,8 +144,10 @@ void WideGEMM_String(const void *key, int len, uint32_t seed, void *out) {
     
     // Robust Length Mix: Mix into ALL accumulators using ADD
     // Ensuring length affects bits differently than data
+    // Multiplying by (i+1) ensures h[0] gets +len, h[4] gets +5*len.
+    // The difference (4*len) will not cancel out in the XOR.
     for(int i=0; i<8; i++) {
-        h[i] += len;
+        h[i] += len * (i + 1);
     }
 
     // Finalizer (Same as Integer)
