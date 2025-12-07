@@ -1034,6 +1034,8 @@ void SelfTest(bool verbose) {
 
 //----------------------------------------------------------------------------
 
+//----------------------------------------------------------------------------
+
 template < typename hashtype >
 void test ( hashfunc<hashtype> hash, HashInfo* info )
 {
@@ -1071,24 +1073,36 @@ void test ( hashfunc<hashtype> hash, HashInfo* info )
   }
   if (strcmp(info->name, "WideGEMM_String") == 0) {
       printf("--- Testing WideGEMM_String ---\n");
-      bool verbose = true; // Set to false to reduce noise if passing
+      bool verbose = true; 
 
-      // 1. BOUNDARY CHECKS (Critical for Chunked Hashes)
-      // Test lengths around your 16-byte block size to verify padding logic.
+      // 1. BOUNDARY CHECKS (Padding Verification)
       printf("Testing Boundary Avalanche (15, 16, 17 bytes)...\n");
       AvalancheTest< Blob<15>, hashtype >(hash, 50000, false);
       AvalancheTest< Blob<16>, hashtype >(hash, 50000, false);
       AvalancheTest< Blob<17>, hashtype >(hash, 50000, false);
+
+      // 2. STRUCTURAL CHECKS
+      // Checks for extension attacks (A vs A\0)
+      // "Zeroes" -> AppendedZeroesTest checks this specific property
+      AppendedZeroesTest(hash, sizeof(hashtype)*8);
+      // ZeroKeyTest checks 0-filled keys of various lengths (canonical Zeroes test)
+      ZeroKeyTest<hashtype>(hash, false);
       
-      // 2. SPARSE & CYCLIC (Critical for Math Validation)
-      // Checks if your "Rotation" and "Multiplication" handle zeros/repeats.
+      // Checks for cancellation between bytes
+      // TwoBytesTest2 is the correct function in this codebase
+      TwoBytesTest2<hashtype>(hash, 24, false); 
+
+      // 3. SPARSE & CYCLIC
       printf("Testing Sparse & Cyclic Keys...\n");
-      // Sparse keys of 128 bits (16 bytes) with up to 4 bits set
       SparseKeyTest<128, hashtype>(hash, 4, true, true, true, false);      
-      // Cyclic: 8-byte cycle repeated 16 times (128 bytes total), 100000 keys
       CyclicKeyTest<hashtype>(hash, 8, 16, 100000, false);
 
-      // 3. REAL WORLD TEXT (Your original tests)
+      // 4. DIFFERENTIAL
+      printf("Testing Differential Properties...\n");
+      // DiffTest checks if small changes propagate (using 2 bits, 1000 reps)
+      DiffTest< Blob<64>, hashtype >(hash, 2, 1000, false);
+
+      // 5. REAL WORLD
       const char * alnum = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
       TextKeyTest( hash, "Foo",    alnum, 4, "Bar",    false );
       WordsKeyTest( hash, 100000L, 6, 16, alnum, "alnum", false );
