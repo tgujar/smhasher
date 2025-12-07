@@ -75,10 +75,14 @@ void WideGEMM_BitStripe(const void *key, int len, uint32_t seed, void *out) {
     *(uint64_t*)out = packed;
 }
 
+
 void WideGEMM_String(const void *key, int len, uint32_t seed, void *out) {
     GenerateWeights(seed);
     
-    int32_t h[8] = {0};
+    // Initialize state with noise (IV) to prevent zero-sticking
+    int32_t h[8];
+    for(int i=0; i<8; ++i) h[i] = g_weights[i][i]; 
+    
     const uint8_t * data = (const uint8_t*)key;
     int remaining = len;
     uint32_t round_idx = 0;
@@ -87,7 +91,12 @@ void WideGEMM_String(const void *key, int len, uint32_t seed, void *out) {
     // Process 16-byte chunks
     while (remaining >= 16) {
         // Step A: Inject counter to break zero-blocks
-        h[0] += round_idx++;
+        // Inject round counter into ALL lanes
+        // Adding 'i' ensures lanes diverge even if they start identical
+        uint32_t round_salt = round_idx++;
+        for(int i=0; i<8; ++i) {
+            h[i] += round_salt + i; 
+        }
 
         // Step B: Project (Tensor Core)
         int32_t partial[8] = {0};
@@ -114,8 +123,11 @@ void WideGEMM_String(const void *key, int len, uint32_t seed, void *out) {
             std::memcpy(buffer, data, remaining);
         }
         
-        // Inject round index into tail too
-        h[0] += round_idx++;
+        // Inject round index into tail too (Broadcast)
+        uint32_t round_salt = round_idx++;
+        for(int i=0; i<8; ++i) {
+            h[i] += round_salt + i; 
+        }
 
         int32_t partial[8] = {0};
         for (int col = 0; col < 8; col++) {
