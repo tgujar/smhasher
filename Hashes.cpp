@@ -9,15 +9,11 @@
 //#include <xmmintrin.h>
 #include <random>
 #include <cstring>
-
 // ----------------------------------------------------------------------------
 // Mock GPU logic for WideGEMM_BitStripe (Optimized Hybrid Design)
 // ----------------------------------------------------------------------------
-
 static int8_t g_weights[16][8];
 static uint32_t g_cached_seed = 0xFFFFFFFF; // Init to impossible seed or force update first time
-
-#include <iostream>
 
 // Helper to mock curand behavior on GPU
 static void GenerateWeights(uint32_t seed) {
@@ -86,17 +82,14 @@ void WideGEMM_String(const void *key, int len, uint32_t seed, void *out) {
     const uint8_t * data = (const uint8_t*)key;
     int remaining = len;
     uint32_t round_idx = 0;
+    const int32_t P = 0x9E3779B9; // Standard hashing prime
     
     // Process 16-byte chunks
     while (remaining >= 16) {
-        // Robustness V4 (ARX): Inject round index into ALL accumulators
-        // Using XOR here is fine if we use ADD later for accumulation
-        for(int i=0; i<8; i++) {
-            h[i] ^= (round_idx + i);
-        }
-        round_idx++;
+        // Step A: Inject counter to break zero-blocks
+        h[0] += round_idx++;
 
-        // Step A: Project
+        // Step B: Project (Tensor Core)
         int32_t partial[8] = {0};
         for (int col = 0; col < 8; col++) {
             for (int row = 0; row < 16; row++) {
@@ -104,14 +97,11 @@ void WideGEMM_String(const void *key, int len, uint32_t seed, void *out) {
             }
         }
         
-        // Step B: Accumulate using ADD (ARX construction)
-        // Mixing (+) with (^) breaks linearity
-        for(int i=0; i<8; i++) h[i] += partial[i];
-        
-        // Rotate State (Circular Shift)
-        int32_t temp = h[0];
-        for(int i=0; i<7; ++i) h[i] = h[i+1];
-        h[7] = temp;
+        // Step C: Polynomial Update
+        // Replaces Accumulate + Rotate
+        for(int i=0; i<8; i++) {
+            h[i] = (h[i] * P) + partial[i];
+        }
         
         data += 16;
         remaining -= 16;
@@ -125,9 +115,7 @@ void WideGEMM_String(const void *key, int len, uint32_t seed, void *out) {
         }
         
         // Inject round index into tail too
-        for(int i=0; i<8; i++) {
-            h[i] ^= (round_idx + i);
-        }
+        h[0] += round_idx++;
 
         int32_t partial[8] = {0};
         for (int col = 0; col < 8; col++) {
@@ -135,8 +123,11 @@ void WideGEMM_String(const void *key, int len, uint32_t seed, void *out) {
                 partial[col] += buffer[row] * g_weights[row][col];
             }
         }
-        // Accumulate using ADD
-        for(int i=0; i<8; i++) h[i] += partial[i];
+        
+        // Polynomial Update for Tail
+        for(int i=0; i<8; i++) {
+            h[i] = (h[i] * P) + partial[i];
+        }
     }
     
     // Robust Length Mix: Mix into ALL accumulators using ADD
@@ -168,11 +159,11 @@ void WideGEMM_String(const void *key, int len, uint32_t seed, void *out) {
 
     *(uint64_t*)out = packed;
 }
+
 // objsize: 0x2f-0x0: 47
-void
-BadHash(const void *key, int len, uint32_t seed, void *out)
+void BadHash(const void *key, int len, uint32_t seed, void *out)
 {
-  uint32_t	  h = seed;
+  uint32_t    h = seed;
   const uint8_t  *data = (const uint8_t *)key;
   const uint8_t *const end = &data[len];
 
@@ -184,7 +175,6 @@ BadHash(const void *key, int len, uint32_t seed, void *out)
 
   *(uint32_t *) out = h;
 }
-
 // objsize: 0x19b-0x30: 363
 void
 sumhash(const void *key, int len, uint32_t seed, void *out)
