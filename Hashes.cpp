@@ -9,12 +9,15 @@
 //#include <xmmintrin.h>
 #include <random>
 #include <cstring>
+
 // ----------------------------------------------------------------------------
 // Mock GPU logic for WideGEMM_BitStripe (Optimized Hybrid Design)
 // ----------------------------------------------------------------------------
 
-static int8_t g_weights[8][8];
+static int8_t g_weights[16][8];
 static uint32_t g_cached_seed = 0xFFFFFFFF; // Init to impossible seed or force update first time
+
+#include <iostream>
 
 // Helper to mock curand behavior on GPU
 static void GenerateWeights(uint32_t seed) {
@@ -25,7 +28,7 @@ static void GenerateWeights(uint32_t seed) {
     std::mt19937 rng(seed);
     std::uniform_int_distribution<int> dist(-128, 127);
 
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 16; i++) {
         for (int j = 0; j < 8; j++) {
             g_weights[i][j] = (int8_t)dist(rng);
         }
@@ -75,8 +78,96 @@ void WideGEMM_BitStripe(const void *key, int len, uint32_t seed, void *out) {
     packed ^= packed >> 32;
     *(uint64_t*)out = packed;
 }
-//fake / bad hashes
 
+void WideGEMM_String(const void *key, int len, uint32_t seed, void *out) {
+    GenerateWeights(seed);
+    
+    int32_t h[8] = {0};
+    const uint8_t * data = (const uint8_t*)key;
+    int remaining = len;
+    uint32_t round_idx = 0;
+    
+    // Process 16-byte chunks
+    while (remaining >= 16) {
+        // Robustness V4 (ARX): Inject round index into ALL accumulators
+        // Using XOR here is fine if we use ADD later for accumulation
+        for(int i=0; i<8; i++) {
+            h[i] ^= (round_idx + i);
+        }
+        round_idx++;
+
+        // Step A: Project
+        int32_t partial[8] = {0};
+        for (int col = 0; col < 8; col++) {
+            for (int row = 0; row < 16; row++) {
+                partial[col] += (int8_t)data[row] * g_weights[row][col];
+            }
+        }
+        
+        // Step B: Accumulate using ADD (ARX construction)
+        // Mixing (+) with (^) breaks linearity
+        for(int i=0; i<8; i++) h[i] += partial[i];
+        
+        // Rotate State (Circular Shift)
+        int32_t temp = h[0];
+        for(int i=0; i<7; ++i) h[i] = h[i+1];
+        h[7] = temp;
+        
+        data += 16;
+        remaining -= 16;
+    }
+    
+    // Tail Handling
+    int8_t buffer[16] = {0};
+    if (len % 16 != 0 || len == 0) {
+        if (remaining > 0) {
+            std::memcpy(buffer, data, remaining);
+        }
+        
+        // Inject round index into tail too
+        for(int i=0; i<8; i++) {
+            h[i] ^= (round_idx + i);
+        }
+
+        int32_t partial[8] = {0};
+        for (int col = 0; col < 8; col++) {
+            for (int row = 0; row < 16; row++) {
+                partial[col] += buffer[row] * g_weights[row][col];
+            }
+        }
+        // Accumulate using ADD
+        for(int i=0; i<8; i++) h[i] += partial[i];
+    }
+    
+    // Robust Length Mix: Mix into ALL accumulators using ADD
+    // Ensuring length affects bits differently than data
+    for(int i=0; i<8; i++) {
+        h[i] += len;
+    }
+
+    // Finalizer (Same as Integer)
+    // Collapse 8 -> 4 (XOR)
+    int32_t t0 = h[0] ^ h[4];
+    int32_t t1 = h[1] ^ h[5];
+    int32_t t2 = h[2] ^ h[6];
+    int32_t t3 = h[3] ^ h[7];
+    
+    // Pack
+    uint64_t packed = 
+          ((uint64_t)(uint32_t)t0)
+        ^ ((uint64_t)(uint32_t)t1 << 16)
+        ^ ((uint64_t)(uint32_t)t2 << 32)
+        ^ ((uint64_t)(uint32_t)t3 << 48);
+        
+    // XXH64 Avalanche
+    packed ^= packed >> 33;
+    packed *= 0xC2B2AE3D27D4EB4FULL;
+    packed ^= packed >> 29;
+    packed *= 0x165667B19E3779F9ULL;
+    packed ^= packed >> 32;
+
+    *(uint64_t*)out = packed;
+}
 // objsize: 0x2f-0x0: 47
 void
 BadHash(const void *key, int len, uint32_t seed, void *out)

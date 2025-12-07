@@ -94,6 +94,7 @@ HashInfo g_hashes[] =
 {
 // first the bad hash funcs, failing tests:
 { WideGEMM_BitStripe,   64, 0x00000000, "WideGEMM_BitStripe", "Mock GPU Tensor Core Hash", GOOD, {} },
+{ WideGEMM_String,      64, 0x00000000, "WideGEMM_String",    "Rolling Tensor String Hash",  GOOD, {} },
 { DoNothingHash,        32, 0x0, "donothing32", "Do-Nothing function (measure call overhead)", SKIP, {0UL} /* !! */ },
 { DoNothingHash,        64, 0x0, "donothing64", "Do-Nothing function (measure call overhead)", SKIP, {0ULL} /* !! */ },
 { DoNothingHash,       128, 0x0, "donothing128", "Do-Nothing function (measure call overhead)", SKIP, {0UL} /* !! */ },
@@ -1056,6 +1057,33 @@ void test ( hashfunc<hashtype> hash, HashInfo* info )
       SparseKeyTest< 64, hashtype >(hash, 2, true, true, true, g_drawDiagram);
 
       printf("\nCustom tests finished.\n");
+      return;
+  }
+  if (strcmp(info->name, "WideGEMM_String") == 0) {
+      printf("--- Testing WideGEMM_String ---\n");
+      bool verbose = true; // Set to false to reduce noise if passing
+
+      // 1. BOUNDARY CHECKS (Critical for Chunked Hashes)
+      // Test lengths around your 16-byte block size to verify padding logic.
+      printf("Testing Boundary Avalanche (15, 16, 17 bytes)...\n");
+      AvalancheTest< Blob<15>, hashtype >(hash, 50000, false);
+      AvalancheTest< Blob<16>, hashtype >(hash, 50000, false);
+      AvalancheTest< Blob<17>, hashtype >(hash, 50000, false);
+      
+      // 2. SPARSE & CYCLIC (Critical for Math Validation)
+      // Checks if your "Rotation" and "Multiplication" handle zeros/repeats.
+      printf("Testing Sparse & Cyclic Keys...\n");
+      // Sparse keys of 128 bits (16 bytes) with up to 4 bits set
+      SparseKeyTest<128, hashtype>(hash, 4, true, true, true, false);      
+      // Cyclic: 8-byte cycle repeated 16 times (128 bytes total), 100000 keys
+      CyclicKeyTest<hashtype>(hash, 8, 16, 100000, false);
+
+      // 3. REAL WORLD TEXT (Your original tests)
+      const char * alnum = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+      TextKeyTest( hash, "Foo",    alnum, 4, "Bar",    false );
+      WordsKeyTest( hash, 100000L, 6, 16, alnum, "alnum", false );
+      
+      printf("\nString tests finished.\n");
       return;
   }
 
