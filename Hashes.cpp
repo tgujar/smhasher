@@ -67,13 +67,12 @@ void WideGEMM_BitStripe(const void *key, int len, uint32_t seed, void *out) {
         ^ ((uint64_t)(uint32_t)h[2] << 32)
         ^ ((uint64_t)(uint32_t)h[3] << 48);
 
-    // 5. Step D: Non-Linear Finalizer (2 Rounds)
-    const uint64_t kMul = 0x9ddfea08eb382d69ULL;
-    packed *= kMul;
-    packed ^= (packed >> 47);
-    packed *= kMul;
-    packed ^= (packed >> 47);
-
+    // 5. Step D: Non-Linear Finalizer (XXH64 Avalanche)
+    packed ^= packed >> 33;
+    packed *= 0xC2B2AE3D27D4EB4FULL;
+    packed ^= packed >> 29;
+    packed *= 0x165667B19E3779F9ULL;
+    packed ^= packed >> 32;
     *(uint64_t*)out = packed;
 }
 //fake / bad hashes
