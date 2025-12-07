@@ -10,10 +10,10 @@
 #include <random>
 #include <cstring>
 // ----------------------------------------------------------------------------
-// Mock GPU logic for WideGEMM_BitStripe
+// Mock GPU logic for WideGEMM_BitStripe (Optimized Hybrid Design)
 // ----------------------------------------------------------------------------
 
-static int8_t g_weights[8][4];
+static int8_t g_weights[8][8];
 static uint32_t g_cached_seed = 0xFFFFFFFF; // Init to impossible seed or force update first time
 
 // Helper to mock curand behavior on GPU
@@ -26,7 +26,7 @@ static void GenerateWeights(uint32_t seed) {
     std::uniform_int_distribution<int> dist(-128, 127);
 
     for (int i = 0; i < 8; i++) {
-        for (int j = 0; j < 4; j++) {
+        for (int j = 0; j < 8; j++) {
             g_weights[i][j] = (int8_t)dist(rng);
         }
     }
@@ -42,31 +42,37 @@ void WideGEMM_BitStripe(const void *key, int len, uint32_t seed, void *out) {
     int copy_len = len > 8 ? 8 : len;
     std::memcpy(input, key, copy_len);
 
-    // 2. Compute 4 independent dot products (fake Tensor Core GEMM)
-    int32_t h[4] = {0};
+    // 2. Compute 8 independent dot products (Step A: Expansion)
+    // N=8 columns
+    int32_t h[8] = {0};
     
-    for (int col = 0; col < 4; col++) {
+    for (int col = 0; col < 8; col++) {
         for (int row = 0; row < 8; row++) {
             h[col] += input[row] * g_weights[row][col];
         }
     }
 
-    // 3. Bit-Stripe finalization
-    // Pack 4x 32-bit results into 64-bit output
-    uint64_t h0 = (uint32_t)h[0];
-    uint64_t h1 = (uint32_t)h[1];
-    uint64_t h2 = (uint32_t)h[2];
-    uint64_t h3 = (uint32_t)h[3];
+    // 3. Step B: Collapse (XOR Fold) and Step C: Pack (Tightly)
+    // Fold upper 4 partials onto lower 4
+    int32_t t0 = h[0] ^ h[4];
+    int32_t t1 = h[1] ^ h[5];
+    int32_t t2 = h[2] ^ h[6];
+    int32_t t3 = h[3] ^ h[7];
 
-    uint64_t layer1 = h0 ^ (h1 << 16) ^ (h2 << 32) ^ (h3 << 48);
-    uint64_t layer2 = (h0 << 8) ^ (h1 << 24) ^ (h2 << 40) ^ (h3 << 56);
-    
-    uint64_t result = layer1 ^ layer2;
+    // Pack 17-bit entropy chunks (overlapping) into 64-bit output
+    uint64_t packed = 
+          ((uint64_t)t0)
+        | ((uint64_t)t1 << 16)
+        | ((uint64_t)t2 << 32)
+        | ((uint64_t)t3 << 48);
 
-    *(uint64_t*)out = result;
+    // 4. Step D: Non-Linear Finalizer
+    const uint64_t kMul = 0x9ddfea08eb382d69ULL;
+    packed *= kMul;
+    packed ^= (packed >> 47);
+
+    *(uint64_t*)out = packed;
 }
-
-// ----------------------------------------------------------------------------
 //fake / bad hashes
 
 // objsize: 0x2f-0x0: 47
